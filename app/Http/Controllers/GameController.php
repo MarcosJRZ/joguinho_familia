@@ -11,7 +11,7 @@ use Carbon\Carbon;
 
 class GameController extends Controller
 {
-    private const GROQ_API_URL = 'https://api.groq.com/openai/v1/responses';
+    private const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
     /**
      * Exibe a página principal do jogo
@@ -315,14 +315,18 @@ class GameController extends Controller
 
         $payload = [
             'model' => 'llama-3.3-70b-versatile',
-            'input' => $prompt,
+            'messages' => [
+                ['role' => 'user', 'content' => $prompt]
+            ],
+            'temperature' => 0.7,
+            'max_tokens' => 500
         ];
 
         $data = $this->makeGroqApiRequest($payload);
 
-        if ($data) {
+        if ($data && isset($data['choices'][0]['message']['content'])) {
             try {
-                $content = $data['output'][1]['content'][0]['text'] ?? '';
+                $content = $data['choices'][0]['message']['content'];
                 $themes = array_map('trim', explode(',', $content));
                 
                 // Filtrar temas que já existem (proteção adicional)
@@ -363,14 +367,15 @@ class GameController extends Controller
         }
 
         // Gerar palavras via IA
-        $prompt = "Para o tema '{$theme}', gere 10 palavras com 3 dicas cada uma. ";
+        $prompt = "Para o tema '{$theme}', gere EXATAMENTE 10 palavras com EXATAMENTE 3 dicas cada uma. ";
         $prompt .= "Cada palavra deve ser simples para crianças entenderem. ";
         $prompt .= "IMPORTANTE: As dicas devem ser características GENÉRICAS que se apliquem a VÁRIAS palavras do tema, não específicas demais. ";
         $prompt .= "Isso torna o jogo mais desafiador, pois o impostor terá dicas que podem confundir com outras opções. ";
         $prompt .= "As dicas não devem ser sinônimos da palavra nem muito óbvias. ";
         $prompt .= "Devem ser baseadas em características, comportamentos ou propriedades mais amplas. ";
-        $prompt .= "Formato: palavra1:dica1,dica2,dica3|palavra2:dica1,dica2,dica3. ";
-        $prompt .= "Exemplo para tema 'animais': gato:carnívoro,reflexos rápidos,peludo|cão:doméstico,carnívoro,leal|abelha:pequeno,organizado,trabalha em grupo|pássaro:voa,constrói ninhos,pequeno";
+        $prompt .= "FORMATO OBRIGATÓRIO (sem numeração, sem explicações): palavra1:dica1,dica2,dica3|palavra2:dica1,dica2,dica3|palavra3:dica1,dica2,dica3 ";
+        $prompt .= "Exemplo EXATO para tema 'animais': gato:carnívoro,reflexos rápidos,peludo|cão:doméstico,carnívoro,leal|abelha:pequeno,organizado,trabalha em grupo|pássaro:voa,constrói ninhos,pequeno. ";
+        $prompt .= "NÃO inclua numeração, NÃO inclua explicações, NÃO inclua texto adicional. APENAS o formato solicitado.";
         
         if (!empty($existingWords)) {
             $existingWordsList = implode(', ', array_keys($existingWords));
@@ -381,14 +386,18 @@ class GameController extends Controller
 
         $payload = [
             'model' => 'llama-3.3-70b-versatile',
-            'input' => $prompt,
+            'messages' => [
+                ['role' => 'user', 'content' => $prompt]
+            ],
+            'temperature' => 0.7,
+            'max_tokens' => 1000
         ];
 
         $data = $this->makeGroqApiRequest($payload);
 
-        if ($data) {
+        if ($data && isset($data['choices'][0]['message']['content'])) {
             try {
-                $content = trim($data['output'][1]['content'][0]['text'] ?? '');
+                $content = trim($data['choices'][0]['message']['content']);
                 $wordGroups = array_map('trim', explode('|', $content));
 
                 $newWordsWithHints = [];
@@ -400,8 +409,8 @@ class GameController extends Controller
                         $word = trim($word);
                         $hints = array_map('trim', explode(',', $hintsString));
                         
-                        // Verificar se a palavra não já existe
-                        if (!isset($existingWords[$word]) && !empty($hints)) {
+                        // Verificar se a palavra não já existe e tem exatamente 3 dicas
+                        if (!isset($existingWords[$word]) && count($hints) === 3 && !empty(array_filter($hints))) {
                             $newWordsWithHints[$word] = array_filter($hints);
                         }
                     }
