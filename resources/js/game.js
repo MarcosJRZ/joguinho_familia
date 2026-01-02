@@ -9,14 +9,14 @@ let currentPlayerIndex = 0;
 let firstPlayer = null;
 
 // Inicializar aplicação
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     generateNewThemes();
 });
 
 // Gerar novos temas
 async function generateNewThemes() {
     showLoading();
-    
+
     try {
         const response = await fetch('/api/generate-themes', {
             method: 'POST',
@@ -25,9 +25,9 @@ async function generateNewThemes() {
                 'X-CSRF-TOKEN': csrfToken
             }
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             themes = data.themes;
             renderThemes();
@@ -37,7 +37,7 @@ async function generateNewThemes() {
     } catch (error) {
         console.error('Erro na requisição:', error);
     }
-    
+
     hideLoading();
 }
 
@@ -45,18 +45,18 @@ async function generateNewThemes() {
 function renderThemes() {
     const themesGrid = document.getElementById('themes-grid');
     themesGrid.innerHTML = '';
-    
+
     themes.forEach((theme, index) => {
         const themeCard = document.createElement('div');
         themeCard.className = 'theme-card';
         themeCard.onclick = () => selectTheme(theme, themeCard);
-        
+
         themeCard.innerHTML = `
             <h3>${theme}</h3>
         `;
-        
+
         themesGrid.appendChild(themeCard);
-        
+
         // Animação de entrada
         setTimeout(() => {
             themeCard.classList.add('fade-in');
@@ -70,11 +70,11 @@ function selectTheme(theme, cardElement) {
     document.querySelectorAll('.theme-card').forEach(card => {
         card.classList.remove('selected');
     });
-    
+
     // Selecionar novo tema
     cardElement.classList.add('selected');
     selectedTheme = theme;
-    
+
     // Mostrar seção de jogadores
     document.getElementById('players-section').classList.remove('hidden');
     document.getElementById('players-section').classList.add('fade-in');
@@ -86,16 +86,16 @@ async function startGame() {
         alert('Por favor, selecione um tema primeiro!');
         return;
     }
-    
+
     const playerCount = parseInt(document.getElementById('player-count-input').value);
-    
+
     if (playerCount < 3 || playerCount > 10) {
         alert('O número de jogadores deve ser entre 3 e 10!');
         return;
     }
-    
+
     showLoading();
-    
+
     try {
         const response = await fetch('/api/generate-words', {
             method: 'POST',
@@ -108,14 +108,14 @@ async function startGame() {
                 player_count: playerCount
             })
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             players = data.players;
             firstPlayer = data.first_player;
             currentPlayerIndex = 0;
-            
+
             showDistribution();
             setupPlayerCallScreen();
         } else {
@@ -124,7 +124,7 @@ async function startGame() {
     } catch (error) {
         console.error('Erro na requisição:', error);
     }
-    
+
     hideLoading();
 }
 
@@ -132,7 +132,7 @@ async function startGame() {
 function setupPlayerCallScreen() {
     const callTitle = document.getElementById('player-call-title');
     callTitle.textContent = `Vez do Jogador ${currentPlayerIndex + 1}`;
-    
+
     document.getElementById('player-call-screen').style.display = 'block';
     document.getElementById('player-word-screen').style.display = 'none';
     document.getElementById('final-screen').style.display = 'none';
@@ -144,7 +144,7 @@ function showCurrentPlayerWord() {
     const playerCard = document.getElementById('current-player-card');
     const nextBtn = document.getElementById('next-player-btn');
     const themeDisplay = document.getElementById('selected-theme-display');
-    
+
     document.getElementById('player-word-screen').classList.remove('hidden');
     document.getElementById('player-word-screen').style.display = 'block';
 
@@ -165,14 +165,14 @@ function showCurrentPlayerWord() {
             ${player.role}
         </div>
     `;
-    
+
     // Se for o último jogador, mudar texto do botão
     if (currentPlayerIndex === players.length - 1) {
         nextBtn.innerHTML = '✅ Finalizar';
     } else {
         nextBtn.innerHTML = '➡️ Próximo Jogador';
     }
-    
+
     document.getElementById('player-call-screen').style.display = 'none';
     document.getElementById('player-word-screen').classList.add('fade-in');
 }
@@ -180,7 +180,7 @@ function showCurrentPlayerWord() {
 // Próximo jogador
 function nextPlayer() {
     currentPlayerIndex++;
-    
+
     if (currentPlayerIndex >= players.length) {
         // Todos os jogadores viram, mostrar tela final
         showFinalScreen();
@@ -192,18 +192,20 @@ function nextPlayer() {
 
 // Mostrar tela final
 function showFinalScreen() {
-    const impostorPlayer = players.find(p => p.is_impostor);
     const firstPlayerInfo = document.getElementById('first-player-info');
-    
+
     firstPlayerInfo.innerHTML = `
-        <h3>🎯 Jogador ${firstPlayer} começa o jogo!</h3>
-        <p>O impostor é o jogador ${impostorPlayer.player} (mas isso é segredo! 🤫)</p>
+        <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 10px 0; font-size: 1.8rem;">🚀 Jogador ${firstPlayer} inicia a rodada!</h3>
+            <p style="margin: 0; font-size: 1.1rem; opacity: 0.9;">Agora vocês podem começar a discussão</p>
+        </div>
     `;
-    
+
     document.getElementById('player-call-screen').style.display = 'none';
     document.getElementById('player-word-screen').style.display = 'none';
     document.getElementById('final-screen').style.display = 'block';
     document.getElementById('final-screen').classList.add('fade-in');
+    document.getElementById('final-screen').classList.remove('hidden');
 }
 
 // Mostrar seção de distribuição
@@ -221,15 +223,15 @@ function resetGame() {
     players = [];
     currentPlayerIndex = 0;
     firstPlayer = null;
-    
+
     document.getElementById('theme-section').style.display = 'block';
     document.getElementById('players-section').classList.add('hidden');
     document.getElementById('distribution-section').classList.add('hidden');
-    
+
     document.querySelectorAll('.theme-card').forEach(card => {
         card.classList.remove('selected');
     });
-    
+
     generateNewThemes();
 }
 

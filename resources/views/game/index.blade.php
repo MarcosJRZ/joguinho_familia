@@ -78,7 +78,8 @@
             
             <!-- Tela final com primeiro jogador -->
             <div id="final-screen" class="text-center hidden">
-                <h2 class="text-3xl mb-6 text-green-400">🎉 Todos os jogadores já viram suas palavras!</h2>
+                <h2 class="text-3xl mb-6 text-green-400">🎉 Distribuição Concluída!</h2>
+                <p style="color: #64748b; font-size: 1.1rem; margin-bottom: 30px;">Todos os jogadores já conhecem suas palavras</p>
                 <div class="first-player-info" id="first-player-info">
                     <!-- Informação do primeiro jogador -->
                 </div>
