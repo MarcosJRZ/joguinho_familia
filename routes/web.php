@@ -12,8 +12,13 @@ Route::options('{any}', function () {
         ->header('Access-Control-Allow-Credentials', 'true');
 })->where('any', '.*');
 
-// Página principal do jogo
-Route::get('/', [GameController::class, 'index'])->name('game.index');
+// Página de domínio a venda
+Route::get('/', function () {
+    return view('domain-sale');
+})->name('domain.sale');
+
+// Página do jogo
+Route::get('/jogo', [GameController::class, 'index'])->name('game.index');
 
 // API Routes para AJAX
 Route::post('/api/generate-themes', [GameController::class, 'generateThemes'])->name('api.generate-themes');
