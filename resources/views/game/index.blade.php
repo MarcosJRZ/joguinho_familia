@@ -510,7 +510,7 @@
         <!-- Loading -->
         <div class="loading" id="loading">
             <div class="spinner"></div>
-            <p style="margin-top: 15px;">Gerando conteúdo com IA...</p>
+            <p style="margin-top: 15px;">Gerando conteúdo...</p>
         </div>
     </div>
 
