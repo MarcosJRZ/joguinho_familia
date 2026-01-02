@@ -25,12 +25,6 @@
             <div class="themes-grid" id="themes-grid">
                 <!-- Temas serão carregados aqui -->
             </div>
-            
-            <div style="text-align: center; margin-top: 20px;">
-                <button class="btn btn-secondary" onclick="generateNewThemes()">
-                    🔄 Gerar Novos Temas
-                </button>
-            </div>
         </div>
 
         <!-- Seção de Configuração de Jogadores -->
