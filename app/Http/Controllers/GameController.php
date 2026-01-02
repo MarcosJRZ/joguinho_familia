@@ -67,7 +67,7 @@ class GameController extends Controller
         try {
             $payload = [
                 'model' => 'llama-3.3-70b-versatile',
-                'input' => "Para o tema '{$theme}', gere 1 palavra principal que todos os jogadores receberão e 1 dica relacionada (mas diferente) que o impostor receberá. Formato: palavra|dica. Exemplo para tema 'animais': cachorro|animal de estimação. Lembrando que a palavra e a dica devem ser simples e fáceis de entender para crianças.",
+                'input' => "Para o tema '{$theme}', gere 1 palavra principal que todos os jogadores receberão e 1 dica relacionada (mas diferente e que não seja direta) que o impostor receberá. Formato: palavra|dica. Exemplo para tema 'animais': cachorro|peludo. Lembrando que a palavra e a dica devem ser simples e fáceis de entender para crianças. Outro ponto importante é que a dica não deve ser sinônimo ou muito parecida com a palavra principal para que seja mais dificil que o impostor descubra a palavra.",
             ];
 
             $data = $this->makeGroqApiRequest($payload);
