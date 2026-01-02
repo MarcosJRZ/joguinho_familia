@@ -62,7 +62,13 @@
             
             <!-- Tela da palavra do jogador -->
             <div id="player-word-screen" class="text-center hidden">
-                <div id="current-player-card" class="player-card mx-auto" style="max-width: 400px;">
+                <div class="theme-display" style="margin-bottom: 20px;">
+                    <h3 style="color: #64748b; font-size: 1.2rem; margin-bottom: 10px;">🎯 Tema do Jogo:</h3>
+                    <div id="selected-theme-display" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 24px; border-radius: 25px; display: inline-block; font-weight: 500; font-size: 1.1rem;">
+                        <!-- Tema será preenchido dinamicamente -->
+                    </div>
+                </div>
+                <div id="current-player-card" class="player-card mx-auto">
                     <!-- Conteúdo será preenchido dinamicamente -->
                 </div>
                 <button class="btn btn-secondary mt-6" id="next-player-btn" onclick="nextPlayer()">

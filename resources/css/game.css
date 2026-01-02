@@ -4,6 +4,10 @@
     box-sizing: border-box;
 }
 
+.theme-display {
+    text-align: center;
+}
+
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 50%, #0d1421 100%);
@@ -150,7 +154,7 @@ body {
     left: -100%;
     width: 100%;
     height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
     transition: left 0.5s ease;
 }
 
@@ -299,8 +303,14 @@ body {
     margin-bottom: 10px;
 }
 
-#player-call-screen, #player-word-screen, #final-screen {
-    padding: 40px 20px;
+#player-word-screen {
+    text-align: end;
+}
+
+#player-call-screen,
+#player-word-screen,
+#final-screen {
+    padding: 0px 20px 0px 20px;
     min-height: 300px;
     display: flex;
     flex-direction: column;
@@ -368,7 +378,9 @@ body {
 }
 
 @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .hidden {
@@ -380,8 +392,15 @@ body {
 }
 
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .pulse {
@@ -389,26 +408,34 @@ body {
 }
 
 @keyframes pulse {
-    0% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.7); }
-    70% { box-shadow: 0 0 0 10px rgba(96, 165, 250, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); }
+    0% {
+        box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.7);
+    }
+
+    70% {
+        box-shadow: 0 0 0 10px rgba(96, 165, 250, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
+    }
 }
 
 @media (max-width: 768px) {
     .container {
         padding: 10px;
     }
-    
+
     .game-section {
         padding: 20px;
         margin-bottom: 20px;
     }
-    
+
     .themes-grid {
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
         gap: 10px;
     }
-    
+
     .player-cards {
         grid-template-columns: 1fr;
     }

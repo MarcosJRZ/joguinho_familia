@@ -143,9 +143,19 @@ function showCurrentPlayerWord() {
     const player = players[currentPlayerIndex];
     const playerCard = document.getElementById('current-player-card');
     const nextBtn = document.getElementById('next-player-btn');
+    const themeDisplay = document.getElementById('selected-theme-display');
     
     document.getElementById('player-word-screen').classList.remove('hidden');
     document.getElementById('player-word-screen').style.display = 'block';
+
+    // Preencher o tema selecionado
+    if (themeDisplay && selectedTheme) {
+        themeDisplay.textContent = selectedTheme;
+    } else {
+        if (themeDisplay) {
+            themeDisplay.textContent = 'Tema não definido';
+        }
+    }
 
     playerCard.className = `player-card ${player.is_impostor ? 'impostor' : ''}`;
     playerCard.innerHTML = `
