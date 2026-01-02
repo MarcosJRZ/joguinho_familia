@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
+use Carbon\Carbon;
 
 class GameController extends Controller
 {
@@ -20,35 +22,41 @@ class GameController extends Controller
     }
 
     /**
-     * Gera novos temas usando IA
+     * Gera novos temas usando IA ou cache
      */
     public function generateThemes(): JsonResponse
     {
         try {
-            $payload = [
-                'model' => 'llama-3.3-70b-versatile',
-                'input' => 'Gere exatamente 10 temas diferentes para um jogo de família do tipo "descobrir o impostor". Cada tema deve ser uma categoria simples como: animais, frutas, profissões, etc. Responda apenas com os temas separados por vírgula, sem numeração ou explicações. Os temas também devem ser formatados com a primeira letra maiúscula. Os temas devem ser temas simples e fáceis, para que crianças consiguam particiar.',
-            ];
-
-            $data = $this->makeGroqApiRequest($payload);
-
-            if ($data) {
-                try {
-                    $content = $data['output'][1]['content'][0]['text'] ?? '';
-                    $themes = array_map('trim', explode(',', $content));
-                    $themes = array_filter($themes);
-                } catch (\Throwable $th) {
-                    $themes = [];
-                }
-
-                if (count($themes) >= 8) {
-                    return response()->json([
-                        'success' => true,
-                        'themes' => array_slice($themes, 0, 10)
-                    ]);
-                }
+            // Limpar cache antigo
+            $this->clearOldCache();
+            
+            // Verificar se já temos temas em cache
+            $cacheFileName = $this->getThemesCacheFileName();
+            $cachedThemes = $this->loadThemesFromCache($cacheFileName);
+            
+            if ($cachedThemes && count($cachedThemes) >= 20) {
+                // Retornar 10 temas aleatórios do cache
+                $randomThemes = array_rand(array_flip($cachedThemes), 10);
+                return response()->json([
+                    'success' => true,
+                    'themes' => array_values($randomThemes)
+                ]);
             }
-
+            
+            // Gerar novos temas via IA
+            $newThemes = $this->generateThemesFromAI($cachedThemes ?? []);
+            
+            if (!empty($newThemes)) {
+                // Mesclar com temas existentes e salvar
+                $allThemes = array_unique(array_merge($cachedThemes ?? [], $newThemes));
+                $this->saveThemesToCache($cacheFileName, $allThemes);
+                
+                return response()->json([
+                    'success' => true,
+                    'themes' => array_slice($newThemes, 0, 10)
+                ]);
+            }
+            
             return $this->fallbackThemes();
         } catch (\Exception $e) {
             Log::error('Erro ao gerar temas: ' . $e->getMessage());
@@ -57,7 +65,7 @@ class GameController extends Controller
     }
 
     /**
-     * Gera palavras para um tema específico
+     * Gera palavras para um tema específico usando IA ou cache
      */
     public function generateWords(Request $request): JsonResponse
     {
@@ -65,27 +73,33 @@ class GameController extends Controller
         $playerCount = $request->input('player_count', 5);
 
         try {
-            $payload = [
-                'model' => 'llama-3.3-70b-versatile',
-                'input' => "Para o tema '{$theme}', gere 1 palavra principal que todos os jogadores receberão e 1 dica relacionada (mas diferente e que não seja direta) que o impostor receberá. Formato: palavra|dica. Exemplo para tema 'animais': cachorro|peludo. Lembrando que a palavra e a dica devem ser simples e fáceis de entender para crianças. Outro ponto importante é que a dica não deve ser sinônimo ou muito parecida com a palavra principal para que seja mais dificil que o impostor descubra a palavra.",
-            ];
-
-            $data = $this->makeGroqApiRequest($payload);
-
-            if ($data) {
-                try {
-                    $content = trim($data['output'][1]['content'][0]['text'] ?? '');
-                    $parts = explode('|', $content);
-
-                    if (count($parts) >= 2) {
-                        $word = trim($parts[0]);
-                        $hint = trim($parts[1]);
-
-                        return $this->distributeRoles($word, $hint, $playerCount);
-                    }
-                } catch (\Throwable $th) {
-                    Log::error('Erro ao processar resposta da IA: ' . $th->getMessage());
+            // Limpar cache antigo
+            $this->clearOldCache();
+            
+            // Verificar se já temos palavras em cache para este tema
+            $cacheFileName = $this->getWordsCacheFileName($theme);
+            $cachedWords = $this->loadWordsFromCache($cacheFileName);
+            
+            if ($cachedWords && !empty($cachedWords['words']) && count($cachedWords['words']) >= 10) {
+                // Selecionar palavra aleatória e uma de suas dicas, evitando histórico
+                $selectedPair = $this->selectWordAvoidingHistory($cachedWords['words'], $theme);
+                
+                if ($selectedPair) {
+                    // Adicionar ao histórico
+                    $this->addToHistory($theme, $selectedPair['word'], $selectedPair['hint']);
+                    
+                    return $this->distributeRoles($selectedPair['word'], $selectedPair['hint'], $playerCount);
                 }
+            }
+            
+            // Gerar novas palavras via IA
+            $result = $this->generateWordsFromAI($theme, $cachedWords);
+            
+            if ($result) {
+                // Adicionar ao histórico
+                $this->addToHistory($theme, $result['word'], $result['hint']);
+                
+                return $this->distributeRoles($result['word'], $result['hint'], $playerCount);
             }
 
             return $this->fallbackWords($theme, $playerCount);
@@ -168,6 +182,370 @@ class GameController extends Controller
     }
 
     /**
+     * Gera nome do arquivo de cache para temas
+     */
+    private function getThemesCacheFileName(): string
+    {
+        $date = Carbon::now()->format('Ymd');
+        return "cache/themes_{$date}.json";
+    }
+
+    /**
+     * Gera nome do arquivo de cache para palavras de um tema
+     */
+    private function getWordsCacheFileName(string $theme): string
+    {
+        $date = Carbon::now()->format('Ymd');
+        $themeSlug = str_replace([' ', 'ã', 'ç', 'á', 'é', 'í', 'ó', 'ú', 'â', 'ê', 'ô'], ['_', 'a', 'c', 'a', 'e', 'i', 'o', 'u', 'a', 'e', 'o'], strtolower($theme));
+        return "cache/words_{$themeSlug}_{$date}.json";
+    }
+
+    /**
+     * Remove arquivos de cache antigos (mais de 24 horas)
+     */
+    private function clearOldCache(): void
+    {
+        try {
+            $files = Storage::files('cache');
+            $yesterday = Carbon::now()->subDay()->format('Ymd');
+            
+            foreach ($files as $file) {
+                if (preg_match('/_(\\d{8})\\.json$/', $file, $matches)) {
+                    $fileDate = $matches[1];
+                    if ($fileDate < $yesterday) {
+                        Storage::delete($file);
+                        Log::info("Cache antigo removido: {$file}");
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Erro ao limpar cache: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Carrega temas do cache
+     */
+    private function loadThemesFromCache(string $fileName): ?array
+    {
+        try {
+            if (Storage::exists($fileName)) {
+                $content = Storage::get($fileName);
+                $data = json_decode($content, true);
+                return $data['themes'] ?? null;
+            }
+        } catch (\Exception $e) {
+            Log::error('Erro ao carregar temas do cache: ' . $e->getMessage());
+        }
+        
+        return null;
+    }
+
+    /**
+     * Salva temas no cache
+     */
+    private function saveThemesToCache(string $fileName, array $themes): void
+    {
+        try {
+            $data = [
+                'created_at' => Carbon::now()->toISOString(),
+                'themes' => array_values(array_unique($themes))
+            ];
+            
+            Storage::put($fileName, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            Log::info("Temas salvos no cache: {$fileName}");
+        } catch (\Exception $e) {
+            Log::error('Erro ao salvar temas no cache: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Carrega palavras do cache
+     */
+    private function loadWordsFromCache(string $fileName): ?array
+    {
+        try {
+            if (Storage::exists($fileName)) {
+                $content = Storage::get($fileName);
+                $data = json_decode($content, true);
+                return [
+                    'words' => $data['words'] ?? []
+                ];
+            }
+        } catch (\Exception $e) {
+            Log::error('Erro ao carregar palavras do cache: ' . $e->getMessage());
+        }
+        
+        return null;
+    }
+
+    /**
+     * Salva palavras no cache
+     */
+    private function saveWordsToCache(string $fileName, array $wordsWithHints): void
+    {
+        try {
+            $data = [
+                'created_at' => Carbon::now()->toISOString(),
+                'words' => $wordsWithHints
+            ];
+            
+            Storage::put($fileName, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            Log::info("Palavras salvas no cache: {$fileName}");
+        } catch (\Exception $e) {
+            Log::error('Erro ao salvar palavras no cache: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Gera temas usando IA
+     */
+    private function generateThemesFromAI(array $existingThemes = []): array
+    {
+        $prompt = 'Gere exatamente 10 temas diferentes para um jogo de família do tipo "descobrir o impostor". ';
+        $prompt .= 'Cada tema deve ser uma categoria simples como: animais, frutas, profissões, etc. ';
+        $prompt .= 'Responda apenas com os temas separados por vírgula, sem numeração ou explicações. ';
+        $prompt .= 'Os temas também devem ser formatados com a primeira letra maiúscula. ';
+        $prompt .= 'Os temas devem ser temas simples e fáceis, para que crianças consiguam participar.';
+        
+        if (!empty($existingThemes)) {
+            $existingList = implode(', ', $existingThemes);
+            $prompt .= " NÃO repita estes temas que já existem: {$existingList}. Gere apenas temas novos e diferentes.";
+        }
+
+        $payload = [
+            'model' => 'llama-3.3-70b-versatile',
+            'input' => $prompt,
+        ];
+
+        $data = $this->makeGroqApiRequest($payload);
+
+        if ($data) {
+            try {
+                $content = $data['output'][1]['content'][0]['text'] ?? '';
+                $themes = array_map('trim', explode(',', $content));
+                
+                // Filtrar temas que já existem (proteção adicional)
+                $newThemes = array_filter($themes, function($theme) use ($existingThemes) {
+                    return !in_array($theme, $existingThemes, true);
+                });
+                
+                return array_filter($newThemes);
+            } catch (\Throwable $th) {
+                Log::error('Erro ao processar temas da IA: ' . $th->getMessage());
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Gera palavras usando IA para um tema
+     */
+    private function generateWordsFromAI(string $theme, ?array $cachedWords = null): ?array
+    {
+        $existingWords = $cachedWords['words'] ?? [];
+        
+        // Determinar quantas palavras ainda precisamos
+        $currentWordCount = count($existingWords);
+        
+        if ($currentWordCount >= 20) {
+            // Já temos palavras suficientes, selecionar uma aleatória
+            $availableWords = array_keys($existingWords);
+            $randomWord = $availableWords[array_rand($availableWords)];
+            $wordHints = $existingWords[$randomWord];
+            $randomHint = $wordHints[array_rand($wordHints)];
+            
+            return [
+                'word' => $randomWord,
+                'hint' => $randomHint
+            ];
+        }
+
+        // Gerar palavras via IA
+        $prompt = "Para o tema '{$theme}', gere 10 palavras com 3 dicas cada uma. ";
+        $prompt .= "Cada palavra deve ser simples para crianças entenderem. ";
+        $prompt .= "IMPORTANTE: As dicas devem ser características GENÉRICAS que se apliquem a VÁRIAS palavras do tema, não específicas demais. ";
+        $prompt .= "Isso torna o jogo mais desafiador, pois o impostor terá dicas que podem confundir com outras opções. ";
+        $prompt .= "As dicas não devem ser sinônimos da palavra nem muito óbvias. ";
+        $prompt .= "Devem ser baseadas em características, comportamentos ou propriedades mais amplas. ";
+        $prompt .= "Formato: palavra1:dica1,dica2,dica3|palavra2:dica1,dica2,dica3. ";
+        $prompt .= "Exemplo para tema 'animais': gato:carnívoro,reflexos rápidos,peludo|cão:doméstico,carnívoro,leal|abelha:pequeno,organizado,trabalha em grupo|pássaro:voa,constrói ninhos,pequeno";
+        
+        if (!empty($existingWords)) {
+            $existingWordsList = implode(', ', array_keys($existingWords));
+            $prompt .= ". NÃO repita estas palavras que já existem: {$existingWordsList}";
+        }
+        
+        $prompt .= ". Gere apenas palavras novas com dicas genéricas e desafiadoras.";
+
+        $payload = [
+            'model' => 'llama-3.3-70b-versatile',
+            'input' => $prompt,
+        ];
+
+        $data = $this->makeGroqApiRequest($payload);
+
+        if ($data) {
+            try {
+                $content = trim($data['output'][1]['content'][0]['text'] ?? '');
+                $wordGroups = array_map('trim', explode('|', $content));
+
+                $newWordsWithHints = [];
+                
+                // Processar cada grupo palavra:dica1,dica2,dica3
+                foreach ($wordGroups as $group) {
+                    if (strpos($group, ':') !== false) {
+                        list($word, $hintsString) = explode(':', $group, 2);
+                        $word = trim($word);
+                        $hints = array_map('trim', explode(',', $hintsString));
+                        
+                        // Verificar se a palavra não já existe
+                        if (!isset($existingWords[$word]) && !empty($hints)) {
+                            $newWordsWithHints[$word] = array_filter($hints);
+                        }
+                    }
+                }
+                
+                if (!empty($newWordsWithHints)) {
+                    // Mesclar com palavras existentes
+                    $allWords = array_merge($existingWords, $newWordsWithHints);
+                    
+                    // Limitar a 20 palavras no total
+                    if (count($allWords) > 20) {
+                        $allWords = array_slice($allWords, 0, 20, true);
+                    }
+                    
+                    // Salvar no cache
+                    $cacheFileName = $this->getWordsCacheFileName($theme);
+                    $this->saveWordsToCache($cacheFileName, $allWords);
+                    
+                    // Retornar uma palavra e dica aleatórias das novas
+                    $randomWord = array_rand($newWordsWithHints);
+                    $wordHints = $newWordsWithHints[$randomWord];
+                    $randomHint = $wordHints[array_rand($wordHints)];
+                    
+                    return [
+                        'word' => $randomWord,
+                        'hint' => $randomHint
+                    ];
+                }
+            } catch (\Throwable $th) {
+                Log::error('Erro ao processar palavras da IA: ' . $th->getMessage());
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Gera nome do arquivo de histórico para um tema
+     */
+    private function getHistoryFileName(string $theme): string
+    {
+        $date = Carbon::now()->format('Ymd');
+        $themeSlug = str_replace([' ', 'ã', 'ç', 'á', 'é', 'í', 'ó', 'ú', 'â', 'ê', 'ô'], ['_', 'a', 'c', 'a', 'e', 'i', 'o', 'u', 'a', 'e', 'o'], strtolower($theme));
+        return "cache/history_{$themeSlug}_{$date}.json";
+    }
+
+    /**
+     * Carrega histórico de palavras usadas
+     */
+    private function loadHistory(string $theme): array
+    {
+        try {
+            $fileName = $this->getHistoryFileName($theme);
+            if (Storage::exists($fileName)) {
+                $content = Storage::get($fileName);
+                $data = json_decode($content, true);
+                return $data['history'] ?? [];
+            }
+        } catch (\Exception $e) {
+            Log::error('Erro ao carregar histórico: ' . $e->getMessage());
+        }
+        
+        return [];
+    }
+
+    /**
+     * Adiciona palavra-dica ao histórico
+     */
+    private function addToHistory(string $theme, string $word, string $hint): void
+    {
+        try {
+            $history = $this->loadHistory($theme);
+            
+            // Adicionar novo item
+            $newItem = [
+                'word' => $word,
+                'hint' => $hint,
+                'timestamp' => Carbon::now()->toISOString()
+            ];
+            
+            array_unshift($history, $newItem);
+            
+            // Manter apenas os últimos 15 itens
+            $history = array_slice($history, 0, 15);
+            
+            // Salvar histórico atualizado
+            $fileName = $this->getHistoryFileName($theme);
+            $data = [
+                'created_at' => Carbon::now()->toISOString(),
+                'history' => $history
+            ];
+            
+            Storage::put($fileName, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        } catch (\Exception $e) {
+            Log::error('Erro ao salvar histórico: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Seleciona palavra evitando histórico recente
+     */
+    private function selectWordAvoidingHistory(array $wordsWithHints, string $theme): ?array
+    {
+        $history = $this->loadHistory($theme);
+        $recentPairs = [];
+        
+        // Criar array de pares recentes (últimas 10 combinações)
+        foreach (array_slice($history, 0, 10) as $item) {
+            $recentPairs[] = $item['word'] . '|' . $item['hint'];
+        }
+        
+        // Tentar até 20 vezes encontrar um par que não esteja no histórico
+        $attempts = 0;
+        while ($attempts < 20) {
+            $availableWords = array_keys($wordsWithHints);
+            $randomWord = $availableWords[array_rand($availableWords)];
+            $wordHints = $wordsWithHints[$randomWord];
+            $randomHint = $wordHints[array_rand($wordHints)];
+            
+            $pairKey = $randomWord . '|' . $randomHint;
+            
+            if (!in_array($pairKey, $recentPairs)) {
+                return [
+                    'word' => $randomWord,
+                    'hint' => $randomHint
+                ];
+            }
+            
+            $attempts++;
+        }
+        
+        // Se não conseguir evitar histórico, retornar qualquer par
+        $availableWords = array_keys($wordsWithHints);
+        $randomWord = $availableWords[array_rand($availableWords)];
+        $wordHints = $wordsWithHints[$randomWord];
+        $randomHint = $wordHints[array_rand($wordHints)];
+        
+        return [
+            'word' => $randomWord,
+            'hint' => $randomHint
+        ];
+    }
+
+    /**
      * Temas de fallback caso a IA não funcione
      */
     private function fallbackThemes(): JsonResponse
@@ -197,20 +575,23 @@ class GameController extends Controller
     private function fallbackWords(string $theme, int $playerCount): JsonResponse
     {
         $fallbackData = [
-            'animais' => ['cachorro', 'animal de estimação'],
-            'frutas' => ['maçã', 'fruta vermelha'],
-            'profissões' => ['médico', 'trabalha no hospital'],
-            'objetos da casa' => ['sofá', 'móvel da sala'],
-            'veículos' => ['carro', 'meio de transporte'],
-            'cores' => ['azul', 'cor do céu'],
-            'países' => ['brasil', 'país da américa do sul'],
-            'comidas' => ['pizza', 'comida italiana'],
-            'esportes' => ['futebol', 'esporte com bola'],
-            'filmes famosos' => ['titanic', 'filme de romance no navio']
+            'animais' => ['cachorro', 'doméstico'],
+            'frutas' => ['maçã', 'doce'],
+            'profissões' => ['médico', 'ajuda pessoas'],
+            'objetos da casa' => ['sofá', 'confortável'],
+            'veículos' => ['carro', 'transporte'],
+            'cores' => ['azul', 'frio'],
+            'países' => ['brasil', 'américa do sul'],
+            'comidas' => ['pizza', 'quente'],
+            'esportes' => ['futebol', 'time'],
+            'filmes famosos' => ['titanic', 'drama']
         ];
 
         $themeKey = strtolower($theme);
-        $data = $fallbackData[$themeKey] ?? ['palavra', 'dica da palavra'];
+        $data = $fallbackData[$themeKey] ?? ['palavra', 'característica'];
+        
+        // Adicionar ao histórico
+        $this->addToHistory($theme, $data[0], $data[1]);
 
         return $this->distributeRoles($data[0], $data[1], $playerCount);
     }

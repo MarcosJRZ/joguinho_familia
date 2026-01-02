@@ -429,8 +429,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1 class="title">🎭 Descobrir o Impostor</h1>
-            <p class="subtitle">Um jogo divertido para toda família!</p>
+            <h1 class="title">Impostor</h1>
         </div>
 
         <!-- Seção de Escolha de Tema -->
@@ -458,7 +457,7 @@
             
             <div class="player-count">
                 <label for="player-count-input">Número de jogadores:</label>
-                <input type="number" id="player-count-input" min="3" max="10" value="5">
+                <input type="number" id="player-count-input" min="3" max="10" value="3">
             </div>
             
             <div style="text-align: center;">

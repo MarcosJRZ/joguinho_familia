@@ -17,11 +17,17 @@
 /public/hot
 /public/storage
 /storage/*.key
-/storage/pail
 /vendor
 Homestead.json
 Homestead.yaml
 Thumbs.db
-./storage/framework/sessions/*
-./storage/framework/logs/*
-./storage/framework/views/*
+
+# Storage directories
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/logs/*
+/storage/app/cache/*
+/storage/app/private/*
+
+# Keep .gitkeep files
+!.gitkeep
