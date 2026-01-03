@@ -224,15 +224,7 @@ function resetGame() {
     currentPlayerIndex = 0;
     firstPlayer = null;
 
-    document.getElementById('theme-section').style.display = 'block';
-    document.getElementById('players-section').classList.add('hidden');
-    document.getElementById('distribution-section').classList.add('hidden');
-
-    document.querySelectorAll('.theme-card').forEach(card => {
-        card.classList.remove('selected');
-    });
-
-    generateNewThemes();
+    window.location.reload();
 }
 
 // Mostrar loading

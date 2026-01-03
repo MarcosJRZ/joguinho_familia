@@ -36,10 +36,9 @@ class GameController extends Controller
 
             if ($cachedThemes && count($cachedThemes) >= 20) {
                 // Retornar 10 temas aleatórios do cache
-                $randomThemes = array_rand(array_flip($cachedThemes), 10);
                 return response()->json([
                     'success' => true,
-                    'themes' => array_values($randomThemes)
+                    'themes' => $cachedThemes
                 ]);
             }
 
@@ -75,6 +74,11 @@ class GameController extends Controller
         try {
             // Limpar cache antigo
             $this->clearOldCache();
+
+            // Lógica especial para Clash Royale
+            if (strtolower($theme) === 'clash royale') {
+                return $this->generateClashRoyaleWords($playerCount);
+            }
 
             // Verificar se já temos palavras em cache para este tema
             $cacheFileName = $this->getWordsCacheFileName($theme);
@@ -210,6 +214,11 @@ class GameController extends Controller
             $yesterday = Carbon::now()->subDay()->format('Ymd');
 
             foreach ($files as $file) {
+                // Proteger arquivo fixo do Clash Royale
+                if (str_contains($file, 'words_clash_royale.json')) {
+                    continue;
+                }
+
                 if (preg_match('/_(\\d{8})\\.json$/', $file, $matches)) {
                     $fileDate = $matches[1];
                     if ($fileDate < $yesterday) {
@@ -306,7 +315,7 @@ class GameController extends Controller
         $prompt .= 'Cada tema deve ser uma categoria simples como: animais, frutas, profissões, etc. ';
         $prompt .= 'Responda apenas com os temas separados por vírgula, sem numeração ou explicações. ';
         $prompt .= 'Os temas também devem ser formatados com a primeira letra maiúscula. ';
-        $prompt .= 'Os temas devem ser temas simples e fáceis, para que crianças consiguam participar.';
+        $prompt .= 'Os temas devem ser temas simples e fáceis, para que crianças consiguam participar. E sempre deve incluir o tema sobre o jogo Clash Royale.';
 
         if (!empty($existingThemes)) {
             $existingList = implode(', ', $existingThemes);
@@ -376,7 +385,7 @@ class GameController extends Controller
         $prompt .= "FORMATO OBRIGATÓRIO (sem numeração, sem explicações): palavra1:dica1,dica2,dica3|palavra2:dica1,dica2,dica3|palavra3:dica1,dica2,dica3 ";
         $prompt .= "Exemplo EXATO para tema 'animais': gato:carnívoro,reflexos rápidos,peludo|cão:doméstico,carnívoro,leal|abelha:pequeno,organizado,trabalha em grupo|pássaro:voa,constrói ninhos,pequeno. ";
         $prompt .= "NÃO inclua numeração, NÃO inclua explicações, NÃO inclua texto adicional. APENAS o formato solicitado.";
-        $prompt .= "Tudo deve ser única e exclusivamente em Português do Brasil.";
+        $prompt .= "Tudo deve ser única e exclusivamente em Português do Brasil. Caso o tema seja Clash Royale, as palavras devem ser SOMENTE cartas e você deve pesquisar na wiki do jogo para ter certeza que a carta existe na versão mais recente do jogo, e a dica deve ser sobre características genéricas da carta. Exemplo: Corredor:4 de elixir,raro,rápido";
 
         if (!empty($existingWords)) {
             $existingWordsList = implode(', ', array_keys($existingWords));
@@ -580,6 +589,95 @@ class GameController extends Controller
     }
 
     /**
+     * Gera palavras específicas para o tema Clash Royale
+     */
+    private function generateClashRoyaleWords(int $playerCount): JsonResponse
+    {
+        try {
+            // Carregar lista fixa de cartas do Clash Royale
+            $cardsFile = 'cache/words_clash_royale.json';
+
+            if (!Storage::exists($cardsFile)) {
+                Log::error('Arquivo de cartas do Clash Royale não encontrado');
+                return $this->fallbackWords('Clash Royale', $playerCount);
+            }
+
+            $cardsContent = Storage::get($cardsFile);
+            $cards = json_decode($cardsContent, true);
+
+            if (!is_array($cards) || empty($cards)) {
+                Log::error('Formato inválido do arquivo de cartas do Clash Royale');
+                return $this->fallbackWords('Clash Royale', $playerCount);
+            }
+
+            // Carregar histórico para evitar repetições
+            $history = $this->loadHistory('Clash Royale');
+            $recentCards = array_column(array_slice($history, 0, 10), 'word');
+
+            // Selecionar carta que não esteja no histórico recente
+            $availableCards = array_diff($cards, $recentCards);
+
+            if (empty($availableCards)) {
+                // Se todas as cartas foram usadas recentemente, usar qualquer uma
+                Log::info('Todas as cartas do Clash Royale foram usadas recentemente, selecionando qualquer carta.');
+                $availableCards = $cards;
+            }
+
+            $selectedCard = $availableCards[array_rand($availableCards)];
+
+            // Gerar dica usando IA
+            $hint = $this->generateClashRoyaleHint($selectedCard);
+
+            if (!$hint) {
+                // Fallback para dicas genéricas
+                $hint = 'Carta do Clash Royale';
+            }
+
+            // Adicionar ao histórico
+            $this->addToHistory('Clash Royale', $selectedCard, $hint);
+
+            return $this->distributeRoles($selectedCard, $hint, $playerCount);
+        } catch (\Exception $e) {
+            Log::error('Erro ao gerar palavras do Clash Royale: ' . $e->getMessage());
+            return $this->fallbackWords('Clash Royale', $playerCount);
+        }
+    }
+
+    /**
+     * Gera dica específica para uma carta do Clash Royale usando IA
+     */
+    private function generateClashRoyaleHint(string $cardName): ?string
+    {
+        $prompt = "Para a carta '{$cardName}' do jogo Clash Royale, gere UMA dica genérica em português que seja aplicável a várias cartas do jogo. ";
+        $prompt .= "A dica deve ser sobre características como: tipo de tropa, custo de elixir (baixo/médio/alto), velocidade (lenta/normal/rápida), alcance (corpo a corpo/longo alcance), raridade (comum/rara/épica/lendária), etc. ";
+        $prompt .= "NÃO mencione o nome da carta. NÃO seja muito específico. Seja genérico para tornar o jogo desafiador. ";
+        $prompt .= "Exemplos: 'custo alto de elixir', 'ataca à distância', 'tropa terrestre', 'velocidade rápida', 'raridade épica'. ";
+        $prompt .= "Responda APENAS com a dica, sem explicações adicionais.";
+
+        $payload = [
+            'model' => 'llama-3.3-70b-versatile',
+            'messages' => [
+                ['role' => 'user', 'content' => $prompt]
+            ],
+            'temperature' => 0.7,
+            'max_tokens' => 100
+        ];
+
+        $data = $this->makeGroqApiRequest($payload);
+
+        if ($data && isset($data['choices'][0]['message']['content'])) {
+            $hint = trim($data['choices'][0]['message']['content']);
+
+            // Remover aspas se existirem
+            $hint = trim($hint, '"\'');
+
+            return !empty($hint) ? $hint : null;
+        }
+
+        return null;
+    }
+
+    /**
      * Palavras de fallback caso a IA não funcione
      */
     private function fallbackWords(string $theme, int $playerCount): JsonResponse
@@ -594,7 +692,8 @@ class GameController extends Controller
             'países' => ['brasil', 'américa do sul'],
             'comidas' => ['pizza', 'quente'],
             'esportes' => ['futebol', 'time'],
-            'filmes famosos' => ['titanic', 'drama']
+            'filmes famosos' => ['titanic', 'drama'],
+            'clash royale' => ['Gigante', 'custo alto de elixir']
         ];
 
         $themeKey = strtolower($theme);

@@ -29,5 +29,6 @@ Thumbs.db
 /storage/app/cache/*
 /storage/app/private/*
 
-# Keep .gitkeep files
+# Keep specific files
 !.gitkeep
+!storage/app/private/cache/words_clash_royale.json
