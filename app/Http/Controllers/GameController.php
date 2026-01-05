@@ -30,7 +30,7 @@ class GameController extends Controller
     }
 
     /**
-     * Gera palavras para um tema específico usando IA ou cache
+     * Gera palavras para um tema específico usando palavras fixas em cache
      */
     public function generateWords(Request $request): JsonResponse
     {
@@ -38,7 +38,7 @@ class GameController extends Controller
         $playerCount = $request->input('player_count', 5);
 
         try {
-            // Limpar cache antigo
+            // Limpar histórico antigo (4 horas)
             $this->clearOldCache();
 
             // Lógica especial para Clash Royale
@@ -46,30 +46,23 @@ class GameController extends Controller
                 return $this->generateClashRoyaleWords($playerCount);
             }
 
-            // Verificar se já temos palavras em cache para este tema
+            // Carregar palavras fixas do cache
             $cacheFileName = $this->getWordsCacheFileName($theme);
             $cachedWords = $this->loadWordsFromCache($cacheFileName);
 
-            if ($cachedWords && !empty($cachedWords['words']) && count($cachedWords['words']) >= 10) {
-                // Selecionar palavra aleatória e uma de suas dicas, evitando histórico
-                $selectedPair = $this->selectWordAvoidingHistory($cachedWords['words'], $theme);
-
-                if ($selectedPair) {
-                    // Adicionar ao histórico
-                    $this->addToHistory($theme, $selectedPair['word'], $selectedPair['hint']);
-
-                    return $this->distributeRoles($selectedPair['word'], $selectedPair['hint'], $playerCount);
-                }
+            if (!$cachedWords || empty($cachedWords['words'])) {
+                // Se não há palavras em cache, usar fallback
+                return $this->fallbackWords($theme, $playerCount);
             }
 
-            // Gerar novas palavras via IA
-            $result = $this->generateWordsFromAI($theme, $cachedWords);
+            // Selecionar palavra usando o sistema de histórico inteligente
+            $selectedPair = $this->selectWordWithSmartHistory($cachedWords['words'], $theme);
 
-            if ($result) {
+            if ($selectedPair) {
                 // Adicionar ao histórico
-                $this->addToHistory($theme, $result['word'], $result['hint']);
+                $this->addToHistory($theme, $selectedPair['word'], $selectedPair['hint']);
 
-                return $this->distributeRoles($result['word'], $result['hint'], $playerCount);
+                return $this->distributeRoles($selectedPair['word'], $selectedPair['hint'], $playerCount);
             }
 
             return $this->fallbackWords($theme, $playerCount);
@@ -156,9 +149,8 @@ class GameController extends Controller
      */
     private function getWordsCacheFileName(string $theme): string
     {
-        $date = Carbon::now()->format('Ymd');
         $themeSlug = str_replace([' ', 'ã', 'ç', 'á', 'é', 'í', 'ó', 'ú', 'â', 'ê', 'ô'], ['_', 'a', 'c', 'a', 'e', 'i', 'o', 'u', 'a', 'e', 'o'], strtolower($theme));
-        return "cache/words_{$themeSlug}_{$date}.json";
+        return "cache/words_{$themeSlug}.json";
     }
 
     /**
@@ -346,9 +338,8 @@ class GameController extends Controller
      */
     private function getHistoryFileName(string $theme): string
     {
-        $date = Carbon::now()->format('Ymd');
         $themeSlug = str_replace([' ', 'ã', 'ç', 'á', 'é', 'í', 'ó', 'ú', 'â', 'ê', 'ô'], ['_', 'a', 'c', 'a', 'e', 'i', 'o', 'u', 'a', 'e', 'o'], strtolower($theme));
-        return "cache/history_{$themeSlug}_{$date}.json";
+        return "cache/history_{$themeSlug}.json";
     }
 
     /**
@@ -387,9 +378,6 @@ class GameController extends Controller
 
             array_unshift($history, $newItem);
 
-            // Manter apenas os últimos 15 itens
-            $history = array_slice($history, 0, 15);
-
             // Salvar histórico atualizado
             $fileName = $this->getHistoryFileName($theme);
             $data = [
@@ -404,50 +392,128 @@ class GameController extends Controller
     }
 
     /**
-     * Seleciona palavra evitando histórico recente
+     * Seleciona palavra com histórico inteligente - remove antigas quando acabam não usadas
      */
-    private function selectWordAvoidingHistory(array $wordsWithHints, string $theme): ?array
+    private function selectWordWithSmartHistory(array $wordsWithHints, string $theme): ?array
     {
         $history = $this->loadHistory($theme);
+        $fourHoursAgo = Carbon::now()->subHours(4);
         $recentPairs = [];
 
-        // Criar array de pares recentes (últimas 10 combinações)
-        foreach (array_slice($history, 0, 10) as $item) {
-            $recentPairs[] = $item['word'] . '|' . $item['hint'];
+        // Criar array de pares recentes (últimas 4 horas)
+        foreach ($history as $item) {
+            if (isset($item['timestamp'])) {
+                $itemTime = Carbon::parse($item['timestamp']);
+                if ($itemTime->isAfter($fourHoursAgo)) {
+                    $recentPairs[] = $item['word'] . '|' . $item['hint'];
+                }
+            }
         }
 
-        // Tentar até 20 vezes encontrar um par que não esteja no histórico
-        $attempts = 0;
-        while ($attempts < 20) {
-            $availableWords = array_keys($wordsWithHints);
-            $randomWord = $availableWords[array_rand($availableWords)];
-            $wordHints = $wordsWithHints[$randomWord];
-            $randomHint = $wordHints[array_rand($wordHints)];
-
-            $pairKey = $randomWord . '|' . $randomHint;
-
-            if (!in_array($pairKey, $recentPairs)) {
-                return [
-                    'word' => $randomWord,
-                    'hint' => $randomHint
+        // Criar array de todos os possíveis pares palavra|dica
+        $allPossiblePairs = [];
+        foreach ($wordsWithHints as $word => $hints) {
+            foreach ($hints as $hint) {
+                $allPossiblePairs[] = [
+                    'key' => $word . '|' . $hint,
+                    'word' => $word,
+                    'hint' => $hint
                 ];
             }
-
-            $attempts++;
         }
 
-        // Se não conseguir evitar histórico, retornar qualquer par
-        $availableWords = array_keys($wordsWithHints);
-        $randomWord = $availableWords[array_rand($availableWords)];
-        $wordHints = $wordsWithHints[$randomWord];
-        $randomHint = $wordHints[array_rand($wordHints)];
+        // Filtrar pares não usados recentemente
+        $availablePairs = array_filter($allPossiblePairs, function($pair) use ($recentPairs) {
+            return !in_array($pair['key'], $recentPairs);
+        });
 
+        // Se há pares não usados, selecionar um aleatório
+        if (!empty($availablePairs)) {
+            $selectedPair = $availablePairs[array_rand($availablePairs)];
+            return [
+                'word' => $selectedPair['word'],
+                'hint' => $selectedPair['hint']
+            ];
+        }
+
+        // Se todos foram usados, limpar histórico parcialmente e tentar novamente
+        Log::info("Todos os pares do tema '{$theme}' foram usados. Limpando histórico parcialmente.");
+        $this->clearPartialHistory($theme);
+        
+        // Recarregar histórico após limpeza
+        $history = $this->loadHistory($theme);
+        $recentPairs = [];
+        
+        foreach ($history as $item) {
+            if (isset($item['timestamp'])) {
+                $itemTime = Carbon::parse($item['timestamp']);
+                if ($itemTime->isAfter($fourHoursAgo)) {
+                    $recentPairs[] = $item['word'] . '|' . $item['hint'];
+                }
+            }
+        }
+        
+        // Filtrar novamente
+        $availablePairs = array_filter($allPossiblePairs, function($pair) use ($recentPairs) {
+            return !in_array($pair['key'], $recentPairs);
+        });
+        
+        if (!empty($availablePairs)) {
+            $selectedPair = $availablePairs[array_rand($availablePairs)];
+            return [
+                'word' => $selectedPair['word'],
+                'hint' => $selectedPair['hint']
+            ];
+        }
+        
+        // Como último recurso, selecionar qualquer par
+        $randomPair = $allPossiblePairs[array_rand($allPossiblePairs)];
         return [
-            'word' => $randomWord,
-            'hint' => $randomHint
+            'word' => $randomPair['word'],
+            'hint' => $randomPair['hint']
         ];
     }
 
+    
+    // === FUNÇÕES DE IA (MANTIDAS PARA USO FUTURO) ===
+    
+    /**
+     * Limpa metade do histórico mais antigo quando todos os pares foram usados
+     */
+    private function clearPartialHistory(string $theme): void
+    {
+        try {
+            $history = $this->loadHistory($theme);
+            
+            if (count($history) > 5) {
+                // Ordenar por timestamp (mais recentes primeiro)
+                usort($history, function($a, $b) {
+                    $timeA = isset($a['timestamp']) ? Carbon::parse($a['timestamp']) : Carbon::now()->subDays(1);
+                    $timeB = isset($b['timestamp']) ? Carbon::parse($b['timestamp']) : Carbon::now()->subDays(1);
+                    return $timeB->timestamp - $timeA->timestamp;
+                });
+                
+                // Manter apenas metade mais recente
+                $keepCount = intval(count($history) / 2);
+                $history = array_slice($history, 0, $keepCount);
+                
+                // Salvar histórico reduzido
+                $fileName = $this->getHistoryFileName($theme);
+                $data = [
+                    'created_at' => Carbon::now()->toISOString(),
+                    'history' => $history
+                ];
+                
+                Storage::put($fileName, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+                Log::info("Histórico do tema '{$theme}' reduzido para {$keepCount} itens.");
+            }
+        } catch (\Exception $e) {
+            Log::error('Erro ao limpar histórico parcial: ' . $e->getMessage());
+        }
+    }
+
+    // === FUNÇÕES DE IA (MANTIDAS PARA USO FUTURO) ===
+    
     /**
      * Temas de fallback caso a IA não funcione
      */
