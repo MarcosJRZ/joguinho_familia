@@ -26,41 +26,7 @@ class GameController extends Controller
      */
     public function generateThemes(): JsonResponse
     {
-        try {
-            // Limpar cache antigo
-            $this->clearOldCache();
-
-            // Verificar se já temos temas em cache
-            $cacheFileName = $this->getThemesCacheFileName();
-            $cachedThemes = $this->loadThemesFromCache($cacheFileName);
-
-            if ($cachedThemes && count($cachedThemes) >= 20) {
-                // Retornar 10 temas aleatórios do cache
-                return response()->json([
-                    'success' => true,
-                    'themes' => $cachedThemes
-                ]);
-            }
-
-            // Gerar novos temas via IA
-            $newThemes = $this->generateThemesFromAI($cachedThemes ?? []);
-
-            if (!empty($newThemes)) {
-                // Mesclar com temas existentes e salvar
-                $allThemes = array_unique(array_merge($cachedThemes ?? [], $newThemes));
-                $this->saveThemesToCache($cacheFileName, $allThemes);
-
-                return response()->json([
-                    'success' => true,
-                    'themes' => array_slice($newThemes, 0, 10)
-                ]);
-            }
-
-            return $this->fallbackThemes();
-        } catch (\Exception $e) {
-            Log::error('Erro ao gerar temas: ' . $e->getMessage());
-            return $this->fallbackThemes();
-        }
+        return $this->fallbackThemes();
     }
 
     /**
@@ -186,15 +152,6 @@ class GameController extends Controller
     }
 
     /**
-     * Gera nome do arquivo de cache para temas
-     */
-    private function getThemesCacheFileName(): string
-    {
-        $date = Carbon::now()->format('Ymd');
-        return "cache/themes_{$date}.json";
-    }
-
-    /**
      * Gera nome do arquivo de cache para palavras de um tema
      */
     private function getWordsCacheFileName(string $theme): string
@@ -205,7 +162,7 @@ class GameController extends Controller
     }
 
     /**
-     * Remove arquivos de cache antigos (mais de 24 horas)
+     * Remove arquivos de cache antigos de palavras e histórico (mais de 24 horas)
      */
     private function clearOldCache(): void
     {
@@ -219,9 +176,15 @@ class GameController extends Controller
                     continue;
                 }
 
+                // Proteger arquivos de temas (não devem ser apagados)
+                if (str_contains($file, 'themes')) {
+                    continue;
+                }
+
+                // Apagar apenas arquivos de palavras e histórico antigos
                 if (preg_match('/_(\\d{8})\\.json$/', $file, $matches)) {
                     $fileDate = $matches[1];
-                    if ($fileDate < $yesterday) {
+                    if ($fileDate < $yesterday && (str_contains($file, 'words_') || str_contains($file, 'history_'))) {
                         Storage::delete($file);
                         Log::info("Cache antigo removido: {$file}");
                     }
@@ -229,42 +192,6 @@ class GameController extends Controller
             }
         } catch (\Exception $e) {
             Log::error('Erro ao limpar cache: ' . $e->getMessage());
-        }
-    }
-
-    /**
-     * Carrega temas do cache
-     */
-    private function loadThemesFromCache(string $fileName): ?array
-    {
-        try {
-            if (Storage::exists($fileName)) {
-                $content = Storage::get($fileName);
-                $data = json_decode($content, true);
-                return $data['themes'] ?? null;
-            }
-        } catch (\Exception $e) {
-            Log::error('Erro ao carregar temas do cache: ' . $e->getMessage());
-        }
-
-        return null;
-    }
-
-    /**
-     * Salva temas no cache
-     */
-    private function saveThemesToCache(string $fileName, array $themes): void
-    {
-        try {
-            $data = [
-                'created_at' => Carbon::now()->toISOString(),
-                'themes' => array_values(array_unique($themes))
-            ];
-
-            Storage::put($fileName, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            Log::info("Temas salvos no cache: {$fileName}");
-        } catch (\Exception $e) {
-            Log::error('Erro ao salvar temas no cache: ' . $e->getMessage());
         }
     }
 
@@ -304,52 +231,6 @@ class GameController extends Controller
         } catch (\Exception $e) {
             Log::error('Erro ao salvar palavras no cache: ' . $e->getMessage());
         }
-    }
-
-    /**
-     * Gera temas usando IA
-     */
-    private function generateThemesFromAI(array $existingThemes = []): array
-    {
-        $prompt = 'Gere exatamente 10 temas diferentes para um jogo de família do tipo "descobrir o impostor". ';
-        $prompt .= 'Cada tema deve ser uma categoria simples como: animais, frutas, profissões, etc. ';
-        $prompt .= 'Responda apenas com os temas separados por vírgula, sem numeração ou explicações. ';
-        $prompt .= 'Os temas também devem ser formatados com a primeira letra maiúscula. ';
-        $prompt .= 'Os temas devem ser temas simples e fáceis, para que crianças consiguam participar. E sempre deve incluir o tema sobre o jogo Clash Royale.';
-
-        if (!empty($existingThemes)) {
-            $existingList = implode(', ', $existingThemes);
-            $prompt .= " NÃO repita estes temas que já existem: {$existingList}. Gere apenas temas novos e diferentes.";
-        }
-
-        $payload = [
-            'model' => 'llama-3.3-70b-versatile',
-            'messages' => [
-                ['role' => 'user', 'content' => $prompt]
-            ],
-            'temperature' => 0.7,
-            'max_tokens' => 500
-        ];
-
-        $data = $this->makeGroqApiRequest($payload);
-
-        if ($data && isset($data['choices'][0]['message']['content'])) {
-            try {
-                $content = $data['choices'][0]['message']['content'];
-                $themes = array_map('trim', explode(',', $content));
-
-                // Filtrar temas que já existem (proteção adicional)
-                $newThemes = array_filter($themes, function ($theme) use ($existingThemes) {
-                    return !in_array($theme, $existingThemes, true);
-                });
-
-                return array_filter($newThemes);
-            } catch (\Throwable $th) {
-                Log::error('Erro ao processar temas da IA: ' . $th->getMessage());
-            }
-        }
-
-        return [];
     }
 
     /**
@@ -570,16 +451,26 @@ class GameController extends Controller
     private function fallbackThemes(): JsonResponse
     {
         $themes = [
-            'Animais',
-            'Frutas',
-            'Profissões',
-            'Objetos da Casa',
-            'Veículos',
-            'Cores',
-            'Países',
-            'Comidas',
-            'Esportes',
-            'Filmes Famosos'
+            "Profissões",
+            "Frutas",
+            "Animais",
+            "Países",
+            "Esportes",
+            "Jovens Músicos",
+            "Personagens De Histórias",
+            "Jogos De Tabuleiro",
+            "Times De Futebol",
+            "Clash Royale",
+            "Veículos",
+            "Cidades",
+            "Alimentos",
+            "Dinossauros",
+            "Super-Heróis",
+            "Instrumentos Musicais",
+            "Festas",
+            "Brinquedos",
+            "Aventuras",
+            "Prédios Históricos"
         ];
 
         return response()->json([
