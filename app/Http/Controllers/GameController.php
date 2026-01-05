@@ -257,16 +257,16 @@ class GameController extends Controller
         }
 
         // Gerar palavras via IA
-        $prompt = "Para o tema '{$theme}', gere EXATAMENTE 10 palavras com EXATAMENTE 3 dicas cada uma. ";
+        $prompt = "Para o tema '{$theme}', gere EXATAMENTE 20 palavras com EXATAMENTE 15 dicas cada uma. ";
         $prompt .= "Cada palavra deve ser simples para crianças entenderem. ";
         $prompt .= "IMPORTANTE: As dicas devem ser características GENÉRICAS que se apliquem a VÁRIAS palavras do tema, não específicas demais. ";
         $prompt .= "Isso torna o jogo mais desafiador, pois o impostor terá dicas que podem confundir com outras opções. ";
         $prompt .= "As dicas não devem ser sinônimos da palavra nem muito óbvias. ";
         $prompt .= "Devem ser baseadas em características, comportamentos ou propriedades mais amplas. ";
-        $prompt .= "FORMATO OBRIGATÓRIO (sem numeração, sem explicações): palavra1:dica1,dica2,dica3|palavra2:dica1,dica2,dica3|palavra3:dica1,dica2,dica3 ";
-        $prompt .= "Exemplo EXATO para tema 'animais': gato:carnívoro,reflexos rápidos,peludo|cão:doméstico,carnívoro,leal|abelha:pequeno,organizado,trabalha em grupo|pássaro:voa,constrói ninhos,pequeno. ";
+        $prompt .= "FORMATO OBRIGATÓRIO (sem numeração, sem explicações): palavra1:dica1,dica2,dica3,dica4,dica5,...|palavra2:dica1,dica2,dica3,dica4,dica5,...|palavra3:dica1,dica2,dica3,dica4,dica5,... ";
+        $prompt .= "Exemplo EXATO para tema 'animais': gato:carnívoro,reflexos rápidos,peludo,doméstico,pequeno,mamífero,caçador,ágil,independente,noturno|cão:doméstico,carnívoro,leal,social,protetor,mamífero,caçador,obediente,ativo,territorial|abelha:pequeno,organizado,trabalha em grupo,voador,laboriosa,coletora,importante,social,produtiva,comunicativa. ";
         $prompt .= "NÃO inclua numeração, NÃO inclua explicações, NÃO inclua texto adicional. APENAS o formato solicitado.";
-        $prompt .= "Tudo deve ser única e exclusivamente em Português do Brasil. Caso o tema seja Clash Royale, as palavras devem ser SOMENTE cartas e você deve pesquisar na wiki do jogo para ter certeza que a carta existe na versão mais recente do jogo, e a dica deve ser sobre características genéricas da carta. Exemplo: Corredor:4 de elixir,raro,rápido";
+        $prompt .= "Tudo deve ser única e exclusivamente em Português do Brasil. Caso o tema seja Clash Royale, as palavras devem ser SOMENTE cartas e você deve pesquisar na wiki do jogo para ter certeza que a carta existe na versão mais recente do jogo, e a dica deve ser sobre características genéricas da carta. Exemplo: Corredor:4 de elixir,raro,rápido,terrestre,tropa,ofensivo,versátil,popular,equilibrado,médio";
 
         if (!empty($existingWords)) {
             $existingWordsList = implode(', ', array_keys($existingWords));
@@ -293,16 +293,19 @@ class GameController extends Controller
 
                 $newWordsWithHints = [];
 
-                // Processar cada grupo palavra:dica1,dica2,dica3
+                // Processar cada grupo palavra:dica1,dica2,dica3,...
                 foreach ($wordGroups as $group) {
                     if (strpos($group, ':') !== false) {
                         list($word, $hintsString) = explode(':', $group, 2);
                         $word = trim($word);
                         $hints = array_map('trim', explode(',', $hintsString));
 
-                        // Verificar se a palavra não já existe e tem exatamente 3 dicas
-                        if (!isset($existingWords[$word]) && count($hints) === 3 && !empty(array_filter($hints))) {
-                            $newWordsWithHints[$word] = array_filter($hints);
+                        // Filtrar dicas vazias
+                        $hints = array_filter($hints);
+
+                        // Verificar se a palavra não já existe e tem pelo menos 1 dica
+                        if (!isset($existingWords[$word]) && !empty($hints)) {
+                            $newWordsWithHints[$word] = $hints;
                         }
                     }
                 }
@@ -456,6 +459,7 @@ class GameController extends Controller
             "Animais",
             "Países",
             "Esportes",
+            "Utensílios Domésticos",
             "Jovens Músicos",
             "Personagens De Histórias",
             "Jogos De Tabuleiro",
