@@ -18,7 +18,179 @@ class GameController extends Controller
      */
     public function index(): View
     {
+        // Registrar acesso com informações detalhadas
+        $this->logAccess();
+
         return view('game.index');
+    }
+
+    /**
+     * Registra acesso ao jogo com informações detalhadas do dispositivo
+     */
+    private function logAccess(): void
+    {
+        try {
+            $request = request();
+
+            // Capturar IP real (considerando proxies/load balancers)
+            $clientIp = $this->getRealIpAddress($request);
+
+            // Capturar informações do dispositivo/navegador
+            $userAgent = $request->header('User-Agent', 'Desconhecido');
+            $acceptLanguage = $request->header('Accept-Language', 'Não informado');
+            $referer = $request->header('Referer', 'Acesso direto');
+            $host = $request->header('Host', 'Não informado');
+
+            // Informações da requisição
+            $uri = $request->getRequestUri();
+            $scheme = $request->getScheme();
+            $timestamp = Carbon::now()->toISOString();
+
+            // Tentar extrair informações básicas do User-Agent
+            $deviceInfo = $this->parseUserAgent($userAgent);
+
+            // Log resumido para visualização rápida
+            Log::info("🎮 ACESSO: {$clientIp} | {$deviceInfo['platform']} | {$deviceInfo['browser']}" .
+                ($deviceInfo['is_mobile'] ? ' | 📱 Mobile' : '') .
+                ($deviceInfo['is_bot'] ? ' | 🤖 Bot' : ''));
+
+            // Log formatado e detalhado
+            $logMessage = "\n" . str_repeat("=", 50) . "\n";
+            $logMessage .= "🎮 ACESSO DETALHADO AO JOGO\n";
+            $logMessage .= str_repeat("=", 50) . "\n";
+            $logMessage .= "📅 Data/Hora: {$timestamp}\n";
+            $logMessage .= "🌐 IP Address: {$clientIp}\n";
+            $logMessage .= "💻 Dispositivo: {$deviceInfo['platform']}\n";
+            $logMessage .= "🌍 Navegador: {$deviceInfo['browser']}\n";
+            $logMessage .= "📱 Mobile: " . ($deviceInfo['is_mobile'] ? 'Sim' : 'Não') . "\n";
+            $logMessage .= "🤖 Bot: " . ($deviceInfo['is_bot'] ? 'Sim' : 'Não') . "\n";
+            $logMessage .= "🔗 URL: {$scheme}://{$host}{$uri}\n";
+            $logMessage .= "🌐 Idioma: {$acceptLanguage}\n";
+            $logMessage .= "🔄 Referer: {$referer}\n";
+            $logMessage .= str_repeat("=", 50);
+
+            Log::info($logMessage);
+        } catch (\Exception $e) {
+            Log::error('Erro ao registrar acesso: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Obtém o IP real do cliente considerando proxies e load balancers
+     */
+    private function getRealIpAddress($request): string
+    {
+        // Headers possíveis que contêm o IP real
+        $ipHeaders = [
+            'HTTP_CF_CONNECTING_IP',     // Cloudflare
+            'HTTP_X_REAL_IP',           // Nginx proxy
+            'HTTP_X_FORWARDED_FOR',     // Proxy padrão
+            'HTTP_X_FORWARDED',         // Proxy
+            'HTTP_X_CLUSTER_CLIENT_IP', // Cluster
+            'HTTP_CLIENT_IP',           // Proxy
+            'REMOTE_ADDR'               // IP direto
+        ];
+
+        foreach ($ipHeaders as $header) {
+            $ip = $request->server($header);
+
+            if (!empty($ip) && $ip !== 'unknown') {
+                // Se for uma lista (X-Forwarded-For pode ter múltiplos IPs)
+                if (str_contains($ip, ',')) {
+                    $ip = trim(explode(',', $ip)[0]);
+                }
+
+                // Validar se é um IP válido
+                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                    return $ip;
+                }
+
+                // Se não passou na validação mas não é localhost, retornar mesmo assim
+                if (filter_var($ip, FILTER_VALIDATE_IP)) {
+                    return $ip;
+                }
+            }
+        }
+
+        return $request->ip() ?? 'IP não identificado';
+    }
+
+    /**
+     * Extrai informações básicas do User-Agent
+     */
+    private function parseUserAgent(string $userAgent): array
+    {
+        $info = [
+            'platform' => 'Desconhecido',
+            'browser' => 'Desconhecido',
+            'is_mobile' => false,
+            'is_bot' => false
+        ];
+
+        // Detectar se é bot
+        $botSignatures = ['bot', 'crawl', 'spider', 'scan', 'index'];
+        foreach ($botSignatures as $signature) {
+            if (str_contains(strtolower($userAgent), $signature)) {
+                $info['is_bot'] = true;
+                break;
+            }
+        }
+
+        // Detectar plataforma/OS
+        if (preg_match('/Windows NT ([\\d\\.]+)/', $userAgent, $matches)) {
+            $info['platform'] = 'Windows ' . $this->getWindowsVersion($matches[1]);
+        } elseif (str_contains($userAgent, 'Mac OS X')) {
+            preg_match('/Mac OS X ([\\d_]+)/', $userAgent, $matches);
+            $info['platform'] = 'macOS ' . (isset($matches[1]) ? str_replace('_', '.', $matches[1]) : '');
+        } elseif (str_contains($userAgent, 'Linux')) {
+            $info['platform'] = 'Linux';
+        } elseif (str_contains($userAgent, 'Android')) {
+            preg_match('/Android ([\\d\\.]+)/', $userAgent, $matches);
+            $info['platform'] = 'Android ' . ($matches[1] ?? '');
+            $info['is_mobile'] = true;
+        } elseif (str_contains($userAgent, 'iPhone') || str_contains($userAgent, 'iPad')) {
+            preg_match('/OS ([\\d_]+)/', $userAgent, $matches);
+            $device = str_contains($userAgent, 'iPad') ? 'iPad' : 'iPhone';
+            $info['platform'] = $device . ' iOS ' . (isset($matches[1]) ? str_replace('_', '.', $matches[1]) : '');
+            $info['is_mobile'] = true;
+        }
+
+        // Detectar navegador
+        if (str_contains($userAgent, 'Chrome/') && !str_contains($userAgent, 'Edg/')) {
+            preg_match('/Chrome\\/([\\.\\d]+)/', $userAgent, $matches);
+            $info['browser'] = 'Chrome ' . ($matches[1] ?? '');
+        } elseif (str_contains($userAgent, 'Firefox/')) {
+            preg_match('/Firefox\\/([\\.\\d]+)/', $userAgent, $matches);
+            $info['browser'] = 'Firefox ' . ($matches[1] ?? '');
+        } elseif (str_contains($userAgent, 'Safari/') && !str_contains($userAgent, 'Chrome')) {
+            preg_match('/Version\\/([\\.\\d]+)/', $userAgent, $matches);
+            $info['browser'] = 'Safari ' . ($matches[1] ?? '');
+        } elseif (str_contains($userAgent, 'Edg/')) {
+            preg_match('/Edg\\/([\\.\\d]+)/', $userAgent, $matches);
+            $info['browser'] = 'Edge ' . ($matches[1] ?? '');
+        } elseif (str_contains($userAgent, 'Opera') || str_contains($userAgent, 'OPR/')) {
+            $info['browser'] = 'Opera';
+        }
+
+        return $info;
+    }
+
+    /**
+     * Converte versão do Windows NT para nome amigável
+     */
+    private function getWindowsVersion(string $ntVersion): string
+    {
+        $versions = [
+            '10.0' => '10/11',
+            '6.3' => '8.1',
+            '6.2' => '8',
+            '6.1' => '7',
+            '6.0' => 'Vista',
+            '5.1' => 'XP',
+            '5.0' => '2000'
+        ];
+
+        return $versions[$ntVersion] ?? $ntVersion;
     }
 
     /**
@@ -423,7 +595,7 @@ class GameController extends Controller
         }
 
         // Filtrar pares não usados recentemente
-        $availablePairs = array_filter($allPossiblePairs, function($pair) use ($recentPairs) {
+        $availablePairs = array_filter($allPossiblePairs, function ($pair) use ($recentPairs) {
             return !in_array($pair['key'], $recentPairs);
         });
 
@@ -439,11 +611,11 @@ class GameController extends Controller
         // Se todos foram usados, limpar histórico parcialmente e tentar novamente
         Log::info("Todos os pares do tema '{$theme}' foram usados. Limpando histórico parcialmente.");
         $this->clearPartialHistory($theme);
-        
+
         // Recarregar histórico após limpeza
         $history = $this->loadHistory($theme);
         $recentPairs = [];
-        
+
         foreach ($history as $item) {
             if (isset($item['timestamp'])) {
                 $itemTime = Carbon::parse($item['timestamp']);
@@ -452,12 +624,12 @@ class GameController extends Controller
                 }
             }
         }
-        
+
         // Filtrar novamente
-        $availablePairs = array_filter($allPossiblePairs, function($pair) use ($recentPairs) {
+        $availablePairs = array_filter($allPossiblePairs, function ($pair) use ($recentPairs) {
             return !in_array($pair['key'], $recentPairs);
         });
-        
+
         if (!empty($availablePairs)) {
             $selectedPair = $availablePairs[array_rand($availablePairs)];
             return [
@@ -465,7 +637,7 @@ class GameController extends Controller
                 'hint' => $selectedPair['hint']
             ];
         }
-        
+
         // Como último recurso, selecionar qualquer par
         $randomPair = $allPossiblePairs[array_rand($allPossiblePairs)];
         return [
@@ -476,7 +648,7 @@ class GameController extends Controller
 
     
     // === FUNÇÕES DE IA (MANTIDAS PARA USO FUTURO) ===
-    
+
     /**
      * Limpa metade do histórico mais antigo quando todos os pares foram usados
      */
@@ -484,26 +656,26 @@ class GameController extends Controller
     {
         try {
             $history = $this->loadHistory($theme);
-            
+
             if (count($history) > 5) {
                 // Ordenar por timestamp (mais recentes primeiro)
-                usort($history, function($a, $b) {
+                usort($history, function ($a, $b) {
                     $timeA = isset($a['timestamp']) ? Carbon::parse($a['timestamp']) : Carbon::now()->subDays(1);
                     $timeB = isset($b['timestamp']) ? Carbon::parse($b['timestamp']) : Carbon::now()->subDays(1);
                     return $timeB->timestamp - $timeA->timestamp;
                 });
-                
+
                 // Manter apenas metade mais recente
                 $keepCount = intval(count($history) / 2);
                 $history = array_slice($history, 0, $keepCount);
-                
+
                 // Salvar histórico reduzido
                 $fileName = $this->getHistoryFileName($theme);
                 $data = [
                     'created_at' => Carbon::now()->toISOString(),
                     'history' => $history
                 ];
-                
+
                 Storage::put($fileName, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
                 Log::info("Histórico do tema '{$theme}' reduzido para {$keepCount} itens.");
             }
@@ -513,7 +685,7 @@ class GameController extends Controller
     }
 
     // === FUNÇÕES DE IA (MANTIDAS PARA USO FUTURO) ===
-    
+
     /**
      * Temas de fallback caso a IA não funcione
      */
